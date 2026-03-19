@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "s3-tool"
+version = "0.1.0"
+description = "CLI tool for AWS S3 operations"
+authors = ["Sandro Gogaladze <your-email@example.com>"]
+readme = "README.md"
+packages = [{ include = "s3_tool" }]
+
+[tool.poetry.dependencies]
+python = "^3.10"
+boto3 = "^1.35.0"
+click = "^8.1.7"
+python-dotenv = "^1.0.1"
+filetype = "^1.2.0"
+
+[tool.poetry.group.dev.dependencies]
+
+[build-system]
+requires = ["poetry-core>=1.9.0"]
+build-backend = "poetry.core.masonry.api"
+
+[tool.poetry.scripts]
+s3-tool = "s3_tool.main:cli"
