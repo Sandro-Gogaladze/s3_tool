@@ -113,3 +113,82 @@ def read_bucket_policy(aws_s3_client, bucket_name: str):
     except ClientError:
         logger.exception("Failed to read bucket policy for '%s'", bucket_name)
         return False
+
+
+def get_versioning_status(aws_s3_client, bucket_name: str) -> str:
+    """Return the versioning status of a bucket: Enabled, Suspended, or Disabled."""
+    logger.info("Checking versioning status for bucket '%s'", bucket_name)
+    try:
+        response = aws_s3_client.get_bucket_versioning(Bucket=bucket_name)
+    except ClientError:
+        logger.exception("Failed to get versioning status for '%s'", bucket_name)
+        raise
+    # Status is absent from the response when versioning has never been enabled.
+    status = response.get("Status", "Disabled")
+    logger.info("Versioning status for '%s': %s", bucket_name, status)
+    return status
+
+
+def list_object_versions(aws_s3_client, bucket_name: str, key: str) -> list:
+    """Return all versions of an object, sorted newest first.
+
+    Each entry is a dict with VersionId, LastModified, and IsLatest.
+    """
+    logger.info("Listing versions for '%s' in bucket '%s'", key, bucket_name)
+    try:
+        response = aws_s3_client.list_object_versions(Bucket=bucket_name, Prefix=key)
+    except ClientError:
+        logger.exception("Failed to list versions for '%s'", key)
+        raise
+    versions = response.get("Versions", [])
+    # Filter to exact key match (Prefix can return keys that merely start with `key`)
+    versions = [v for v in versions if v["Key"] == key]
+    versions.sort(key=lambda v: v["LastModified"], reverse=True)
+    logger.info("Found %s version(s) for '%s'", len(versions), key)
+    for v in versions:
+        logger.info("  VersionId: %s | Created: %s | Latest: %s",
+                    v["VersionId"], v["LastModified"], v["IsLatest"])
+    return versions
+
+
+def restore_previous_version(aws_s3_client, bucket_name: str, key: str) -> bool:
+    """Copy the previous version of an object on top of the current one.
+
+    This creates a new version whose content matches the second-most-recent
+    version, effectively rolling back one step without deleting any history.
+    """
+    logger.info("Restoring previous version of '%s' in bucket '%s'", key, bucket_name)
+    versions = list_object_versions(aws_s3_client, bucket_name, key)
+
+    if len(versions) < 2:
+        logger.info("No previous version to restore for '%s' (only %s version(s) exist)", key, len(versions))
+        return False
+
+    # versions[0] is the current (latest), versions[1] is the one before it.
+    previous = versions[1]
+    previous_version_id = previous["VersionId"]
+    logger.info("Copying version '%s' (created %s) as new version", previous_version_id, previous["LastModified"])
+
+    try:
+        aws_s3_client.copy_object(
+            Bucket=bucket_name,
+            Key=key,
+            CopySource={"Bucket": bucket_name, "Key": key, "VersionId": previous_version_id},
+        )
+    except ClientError:
+        logger.exception("Failed to restore previous version of '%s'", key)
+        raise
+    logger.info("Previous version restored successfully as new latest for '%s'", key)
+    return True
+
+
+def delete_object(aws_s3_client, bucket_name: str, key: str) -> bool:
+    logger.info("Deleting object '%s' from bucket '%s'", key, bucket_name)
+    try:
+        response = aws_s3_client.delete_object(Bucket=bucket_name, Key=key)
+    except ClientError:
+        logger.exception("Failed to delete object '%s' from bucket '%s'", key, bucket_name)
+        return False
+    status_code = response["ResponseMetadata"]["HTTPStatusCode"]
+    logger.info("delete_object status code: %s", status_code)
+    return status_code == 204

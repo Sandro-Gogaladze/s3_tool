@@ -17,9 +17,13 @@ from .buckets import (
     create_bucket,
     create_bucket_policy,
     delete_bucket,
+    delete_object,
     generate_public_read_policy,
+    get_versioning_status,
     list_buckets,
+    list_object_versions,
     read_bucket_policy,
+    restore_previous_version,
     set_object_access_policy,
 )
 from .client import init_client
@@ -120,6 +124,63 @@ def read_bucket_policy_command(bucket_name: str):
     client = init_client()
     policy = read_bucket_policy(client, bucket_name)
     logger.info("read_bucket_policy result: %s", policy)
+
+
+@cli.command(name="delete_object")
+@click.option("--bucket-name", required=True, help="Bucket that contains the object.")
+@click.option("--key", required=True, help="S3 object key (file name) to delete.")
+@click.option("-del", "confirm", is_flag=True, default=False, help="Required flag to confirm deletion.")
+def delete_object_command(bucket_name: str, key: str, confirm: bool):
+    """Delete a specific object from a bucket. Must pass -del to confirm."""
+    if not confirm:
+        logger.info("Deletion aborted: pass -del to confirm you want to delete '%s'", key)
+        return
+    client = init_client()
+    status = delete_object(client, bucket_name, key)
+    logger.info("delete_object result: %s", status)
+
+
+# ── Versioning commands ───────────────────────────────────────────────────────
+
+@cli.command(name="versioning_status")
+@click.option("--bucket-name", required=True, help="Bucket to check.")
+@click.option("--versioning", "check", is_flag=True, default=False, help="Show versioning status.")
+def versioning_status_command(bucket_name: str, check: bool):
+    """Check whether versioning is enabled on a bucket."""
+    if not check:
+        logger.info("Pass --versioning to check versioning status")
+        return
+    client = init_client()
+    status = get_versioning_status(client, bucket_name)
+    logger.info("versioning_status result: %s", status)
+
+
+@cli.command(name="object_versions")
+@click.option("--bucket-name", required=True, help="Bucket that contains the object.")
+@click.option("--key", required=True, help="S3 object key (file name).")
+@click.option("--versions", "show", is_flag=True, default=False, help="List all versions of the object.")
+def object_versions_command(bucket_name: str, key: str, show: bool):
+    """Show version count and creation dates for a specific object."""
+    if not show:
+        logger.info("Pass --versions to list versions of '%s'", key)
+        return
+    client = init_client()
+    versions = list_object_versions(client, bucket_name, key)
+    logger.info("Total versions for '%s': %s", key, len(versions))
+
+
+@cli.command(name="restore_version")
+@click.option("--bucket-name", required=True, help="Bucket that contains the object.")
+@click.option("--key", required=True, help="S3 object key (file name).")
+@click.option("--restore", "confirm", is_flag=True, default=False, help="Restore the previous version as the new latest.")
+def restore_version_command(bucket_name: str, key: str, confirm: bool):
+    """Upload the previous version of an object as the new latest version."""
+    if not confirm:
+        logger.info("Pass --restore to restore previous version of '%s'", key)
+        return
+    client = init_client()
+    status = restore_previous_version(client, bucket_name, key)
+    logger.info("restore_version result: %s", status)
 
 
 # ── Upload commands ───────────────────────────────────────────────────────────
