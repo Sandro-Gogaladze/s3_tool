@@ -22,6 +22,7 @@ from .buckets import (
     get_versioning_status,
     list_buckets,
     list_object_versions,
+    organize_by_extension,
     read_bucket_policy,
     restore_previous_version,
     set_object_access_policy,
@@ -138,6 +139,22 @@ def delete_object_command(bucket_name: str, key: str, confirm: bool):
     client = init_client()
     status = delete_object(client, bucket_name, key)
     logger.info("delete_object result: %s", status)
+
+
+# ── Organize command ──────────────────────────────────────────────────────────
+
+@cli.command(name="organize")
+@click.option("--bucket-name", required=True, help="Bucket to organize.")
+@click.option("--organize", "confirm", is_flag=True, default=False, help="Move objects into extension-named folders.")
+def organize_command(bucket_name: str, confirm: bool):
+    """Group all root-level objects into folders named after their extension."""
+    if not confirm:
+        logger.info("Pass --organize to run organization on bucket '%s'", bucket_name)
+        return
+    client = init_client()
+    counts = organize_by_extension(client, bucket_name)
+    for ext, count in sorted(counts.items()):
+        logger.info("%s - %s", ext, count)
 
 
 # ── Versioning commands ───────────────────────────────────────────────────────

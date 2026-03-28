@@ -182,6 +182,67 @@ def restore_previous_version(aws_s3_client, bucket_name: str, key: str) -> bool:
     return True
 
 
+def organize_by_extension(aws_s3_client, bucket_name: str) -> dict[str, int]:
+    """Move every object in the bucket into a folder named after its extension.
+
+    For example:
+      image.jpg  -> jpg/image.jpg
+      demo.csv   -> csv/demo.csv
+
+    Objects that are already inside a folder (key contains '/') are skipped to
+    avoid double-moving on repeated runs. Files with no extension go into
+    'no_extension/'.
+
+    Returns a dict mapping each extension to the number of files moved,
+    e.g. {'jpg': 1, 'csv': 2}.
+    """
+    logger.info("Organizing objects by extension in bucket '%s'", bucket_name)
+
+    # Collect all object keys via paginated listing
+    keys = []
+    paginator = aws_s3_client.get_paginator("list_objects_v2")
+    for page in paginator.paginate(Bucket=bucket_name):
+        for obj in page.get("Contents", []):
+            keys.append(obj["Key"])
+
+    logger.info("Found %s object(s) in bucket '%s'", len(keys), bucket_name)
+
+    counts: dict[str, int] = {}
+
+    for key in keys:
+        # Skip objects that are already inside a folder
+        if "/" in key:
+            logger.info("Skipping '%s' (already in a folder)", key)
+            continue
+
+        file_name = key
+        ext = file_name.rsplit(".", 1)[-1].lower() if "." in file_name else "no_extension"
+        destination = f"{ext}/{file_name}"
+
+        logger.info("Moving '%s' -> '%s'", key, destination)
+
+        # S3 has no native move: copy then delete
+        try:
+            aws_s3_client.copy_object(
+                Bucket=bucket_name,
+                Key=destination,
+                CopySource={"Bucket": bucket_name, "Key": key},
+            )
+            aws_s3_client.delete_object(Bucket=bucket_name, Key=key)
+        except ClientError:
+            logger.exception("Failed to move '%s' to '%s'", key, destination)
+            raise
+
+        counts[ext] = counts.get(ext, 0) + 1
+
+    # Log the summary
+    logger.info("Organization complete. Files moved per extension:")
+    for ext, count in sorted(counts.items()):
+        logger.info("  %s - %s", ext, count)
+
+    return counts
+
+
 def delete_object(aws_s3_client, bucket_name: str, key: str) -> bool:
     logger.info("Deleting object '%s' from bucket '%s'", key, bucket_name)
     try:
