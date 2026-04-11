@@ -14,10 +14,12 @@ import click
 
 from .buckets import (
     bucket_exists,
+    configure_website,
     create_bucket,
     create_bucket_policy,
     delete_bucket,
     delete_object,
+    disable_public_access_block,
     generate_public_read_policy,
     get_versioning_status,
     list_buckets,
@@ -29,7 +31,7 @@ from .buckets import (
 )
 from .client import init_client
 from .lifecycle import read_lifecycle_policy, set_lifecycle_policy
-from .uploads import download_file_and_upload_to_s3, upload_large_file, upload_small_file
+from .uploads import download_file_and_upload_to_s3, upload_directory, upload_large_file, upload_small_file
 
 logger = logging.getLogger(__name__)
 
@@ -249,6 +251,31 @@ def read_lifecycle_command(bucket_name: str):
             logger.info("Rule: %s", rule)
     else:
         logger.info("No lifecycle policy found on '%s'", bucket_name)
+
+
+# ── Host command ─────────────────────────────────────────────────────────────
+
+@cli.command(name="host")
+@click.argument("bucket_name")
+@click.option("--source", required=True, help="Local folder to upload.")
+@click.option("--region", default="us-east-1", show_default=True, help="AWS region for the bucket.")
+def host_command(bucket_name: str, source: str, region: str):
+    """Create (or reuse) a bucket, upload a folder, and enable static website hosting."""
+    client = init_client()
+
+    if not bucket_exists(client, bucket_name):
+        logger.info("Bucket '%s' does not exist, creating it", bucket_name)
+        create_bucket(client, bucket_name, region)
+    else:
+        logger.info("Bucket '%s' already exists, reusing it", bucket_name)
+
+    disable_public_access_block(client, bucket_name)
+    upload_directory(client, bucket_name, source)
+    configure_website(client, bucket_name)
+    create_bucket_policy(client, bucket_name)
+
+    website_url = f"http://{bucket_name}.s3-website-{region}.amazonaws.com"
+    logger.info("Static website URL: %s", website_url)
 
 
 if __name__ == "__main__":

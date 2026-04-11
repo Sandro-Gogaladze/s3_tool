@@ -243,6 +243,36 @@ def organize_by_extension(aws_s3_client, bucket_name: str) -> dict[str, int]:
     return counts
 
 
+def disable_public_access_block(aws_s3_client, bucket_name: str) -> bool:
+    """Remove the Block Public Access settings so bucket policies can allow public reads."""
+    logger.info("Disabling Block Public Access for bucket '%s'", bucket_name)
+    try:
+        aws_s3_client.delete_public_access_block(Bucket=bucket_name)
+    except ClientError:
+        logger.exception("Failed to disable public access block for '%s'", bucket_name)
+        return False
+    logger.info("Block Public Access disabled for '%s'", bucket_name)
+    return True
+
+
+def configure_website(aws_s3_client, bucket_name: str, index_document: str = "index.html", error_document: str = "error.html") -> bool:
+    """Enable static website hosting on a bucket."""
+    logger.info("Configuring website hosting on bucket '%s'", bucket_name)
+    try:
+        aws_s3_client.put_bucket_website(
+            Bucket=bucket_name,
+            WebsiteConfiguration={
+                "IndexDocument": {"Suffix": index_document},
+                "ErrorDocument": {"Key": error_document},
+            },
+        )
+    except ClientError:
+        logger.exception("Failed to configure website for '%s'", bucket_name)
+        return False
+    logger.info("Website hosting configured for '%s'", bucket_name)
+    return True
+
+
 def delete_object(aws_s3_client, bucket_name: str, key: str) -> bool:
     logger.info("Deleting object '%s' from bucket '%s'", key, bucket_name)
     try:

@@ -1,5 +1,6 @@
 import io
 import logging
+import mimetypes
 import os
 from pathlib import Path
 from urllib.request import urlopen
@@ -164,6 +165,79 @@ def upload_large_file(
         aws_s3_client.abort_multipart_upload(Bucket=bucket_name, Key=s3_key, UploadId=upload_id)
         logger.info("Multipart upload aborted")
         raise
+
+
+def upload_directory(aws_s3_client, bucket_name: str, source_dir: str) -> int:
+    """Recursively upload all files from *source_dir* to *bucket_name*.
+
+    Preserves folder structure relative to *source_dir* and sets the
+    Content-Type for each file using mimetypes.guess_type.
+
+    Returns the number of files uploaded.
+    """
+    source_path = Path(source_dir).resolve()
+    if not source_path.is_dir():
+        raise NotADirectoryError(f"Source directory not found: '{source_dir}'")
+
+    uploaded = 0
+    for file_path in sorted(source_path.rglob("*")):
+        if not file_path.is_file():
+            continue
+
+        # Skip hidden files and anything inside hidden directories (e.g. .git/)
+        relative = file_path.relative_to(source_path)
+        if any(part.startswith(".") for part in relative.parts):
+            continue
+
+        s3_key = str(file_path.relative_to(source_path))
+        content_type, _ = mimetypes.guess_type(str(file_path))
+        if content_type is None:
+            content_type = "application/octet-stream"
+
+        file_size = file_path.stat().st_size
+        logger.info("Uploading '%s' -> s3://%s/%s (%s)", file_path, bucket_name, s3_key, content_type)
+
+        try:
+            if file_size <= MULTIPART_THRESHOLD:
+                with open(file_path, "rb") as f:
+                    aws_s3_client.put_object(
+                        Bucket=bucket_name, Key=s3_key, Body=f.read(), ContentType=content_type,
+                    )
+            else:
+                mpu = aws_s3_client.create_multipart_upload(
+                    Bucket=bucket_name, Key=s3_key, ContentType=content_type,
+                )
+                upload_id = mpu["UploadId"]
+                parts = []
+                try:
+                    with open(file_path, "rb") as f:
+                        part_number = 1
+                        while True:
+                            chunk = f.read(CHUNK_SIZE)
+                            if not chunk:
+                                break
+                            response = aws_s3_client.upload_part(
+                                Bucket=bucket_name, Key=s3_key,
+                                UploadId=upload_id, PartNumber=part_number, Body=chunk,
+                            )
+                            parts.append({"PartNumber": part_number, "ETag": response["ETag"]})
+                            part_number += 1
+                    aws_s3_client.complete_multipart_upload(
+                        Bucket=bucket_name, Key=s3_key, UploadId=upload_id,
+                        MultipartUpload={"Parts": parts},
+                    )
+                except Exception:
+                    logger.exception("Multipart upload failed for '%s', aborting", s3_key)
+                    aws_s3_client.abort_multipart_upload(Bucket=bucket_name, Key=s3_key, UploadId=upload_id)
+                    raise
+        except ClientError:
+            logger.exception("Failed to upload '%s'", file_path)
+            raise
+
+        uploaded += 1
+
+    logger.info("Uploaded %s file(s) from '%s' to s3://%s", uploaded, source_dir, bucket_name)
+    return uploaded
 
 
 def download_file_and_upload_to_s3(
