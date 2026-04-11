@@ -6,9 +6,12 @@ All business logic lives in the sibling modules:
   buckets.py    — bucket CRUD and policies
   uploads.py    — small/large file upload and URL-download-then-upload
   lifecycle.py  — lifecycle policy management
+  quotes.py     — inspirational-quote fetching
 """
 
+import json
 import logging
+from datetime import datetime, timezone
 
 import click
 
@@ -31,6 +34,7 @@ from .buckets import (
 )
 from .client import init_client
 from .lifecycle import read_lifecycle_policy, set_lifecycle_policy
+from .quotes import get_quote, print_quote
 from .uploads import download_file_and_upload_to_s3, upload_directory, upload_large_file, upload_small_file
 
 logger = logging.getLogger(__name__)
@@ -276,6 +280,34 @@ def host_command(bucket_name: str, source: str, region: str):
 
     website_url = f"http://{bucket_name}.s3-website-{region}.amazonaws.com"
     logger.info("Static website URL: %s", website_url)
+
+
+# ── Inspire command ──────────────────────────────────────────────────────────
+
+@cli.command(name="inspire")
+@click.argument("bucket_name", required=False, default=None)
+@click.option("--inspire", "author", default=None, help="Author name to filter by. Omit value for a random quote.")
+@click.option("--save", is_flag=True, default=False, help="Save the quote as JSON to the given S3 bucket.")
+def inspire_command(bucket_name: str | None, author: str | None, save: bool):
+    """Fetch an inspirational quote, optionally save it to S3."""
+    data = get_quote(author)
+    if not data:
+        logger.error("Could not fetch a quote")
+        return
+
+    print_quote(data)
+
+    if save:
+        if not bucket_name:
+            logger.error("--save requires a bucket name: s3-tool inspire <bucket> --save")
+            return
+        client = init_client()
+        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        s3_key = f"quote_{timestamp}.json"
+        body = json.dumps(data, indent=2).encode()
+        logger.info("Saving quote to s3://%s/%s", bucket_name, s3_key)
+        client.put_object(Bucket=bucket_name, Key=s3_key, Body=body, ContentType="application/json")
+        logger.info("Quote saved to s3://%s/%s", bucket_name, s3_key)
 
 
 if __name__ == "__main__":
