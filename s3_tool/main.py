@@ -23,6 +23,7 @@ from .buckets import (
     create_bucket_policy,
     delete_bucket,
     delete_object,
+    delete_versions_older_than_six_months,
     disable_public_access_block,
     generate_public_read_policy,
     get_versioning_status,
@@ -205,6 +206,17 @@ def restore_version_command(bucket_name: str, key: str, confirm: bool):
     client = init_client()
     status = restore_previous_version(client, bucket_name, key)
     logger.info("restore_version result: %s", status)
+
+
+@cli.command(name="delete_old_versions")
+@click.option("--bucket-name", required=True, help="Bucket that contains the objects.")
+@click.option("--key", required=True, multiple=True, help="S3 object key to check. Can be passed multiple times.")
+def delete_old_versions_command(bucket_name: str, key: tuple[str, ...]):
+    """Delete versions older than six months for the given object keys."""
+    client = init_client()
+    counts = delete_versions_older_than_six_months(client, bucket_name, key)
+    for object_key, count in counts.items():
+        logger.info("%s - deleted %s old version(s)", object_key, count)
 
 
 # ── Upload commands ───────────────────────────────────────────────────────────
