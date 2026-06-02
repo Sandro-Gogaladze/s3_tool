@@ -11,6 +11,7 @@ All business logic lives in the sibling modules:
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 
 import click
@@ -308,6 +309,67 @@ def inspire_command(bucket_name: str | None, author: str | None, save: bool):
         logger.info("Saving quote to s3://%s/%s", bucket_name, s3_key)
         client.put_object(Bucket=bucket_name, Key=s3_key, Body=body, ContentType="application/json")
         logger.info("Quote saved to s3://%s/%s", bucket_name, s3_key)
+
+
+# ── Upload to folder command ──────────────────────────────────────────────────
+
+def get_folder_for_mime(mime_type: str) -> str:
+    if mime_type.startswith("image/"):
+        return "images"
+    if mime_type.startswith("video/"):
+        return "videos"
+    if mime_type.startswith("audio/"):
+        return "audio"
+    if (
+        mime_type.startswith("text/")
+        or mime_type == "application/pdf"
+        or mime_type == "application/msword"
+        or mime_type.startswith("application/vnd.openxmlformats")
+    ):
+        return "documents"
+    if mime_type in (
+        "application/zip",
+        "application/gzip",
+        "application/x-tar",
+        "application/x-rar",
+        "application/x-7z-compressed",
+    ):
+        return "archives"
+    return "other"
+
+
+def upload_file_to_folder(aws_s3_client, bucket_name: str, file_path: str) -> dict:
+    try:
+        import magic
+
+        mime_type = magic.Magic(mime=True).from_file(file_path)
+        logger.info("Detected MIME type: %s", mime_type)
+        folder = get_folder_for_mime(mime_type)
+        filename = os.path.basename(file_path)
+        key = f"{folder}/{filename}"
+        logger.info("Uploading '%s' to s3://%s/%s", filename, bucket_name, key)
+        with open(file_path, "rb") as f:
+            response = aws_s3_client.put_object(
+                Bucket=bucket_name,
+                Key=key,
+                Body=f,
+                ContentType=mime_type,
+            )
+        logger.info("Uploaded to s3://%s/%s", bucket_name, key)
+        return response
+    except Exception:
+        logger.exception("Failed to upload '%s' to bucket '%s'", file_path, bucket_name)
+        raise
+
+
+@cli.command(name="upload_to_folder")
+@click.option("--bucket-name", required=True, help="Destination S3 bucket.")
+@click.option("--file-path", required=True, help="Local path to the file.")
+def upload_to_folder_command(bucket_name: str, file_path: str):
+    """Detect a file's real MIME type and upload it to the matching subfolder."""
+    client = init_client()
+    status = upload_file_to_folder(client, bucket_name, file_path)
+    logger.info("upload_to_folder result: %s", status)
 
 
 if __name__ == "__main__":
