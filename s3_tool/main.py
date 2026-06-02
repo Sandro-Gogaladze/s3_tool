@@ -23,21 +23,18 @@ from .buckets import (
     create_bucket_policy,
     delete_bucket,
     delete_object,
-    delete_versions_older_than_six_months,
     disable_public_access_block,
     generate_public_read_policy,
-    get_versioning_status,
     list_buckets,
-    list_object_versions,
     organize_by_extension,
     read_bucket_policy,
-    restore_previous_version,
     set_object_access_policy,
 )
 from .client import init_client
 from .lifecycle import read_lifecycle_policy, set_lifecycle_policy
 from .quotes import get_quote, print_quote
 from .uploads import download_file_and_upload_to_s3, upload_directory, upload_large_file, upload_small_file
+from .versioning_cli import register_versioning_commands
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +46,9 @@ def cli(log_level: str):
         level=getattr(logging, log_level.upper(), logging.INFO),
         format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
     )
+
+
+register_versioning_commands(cli)
 
 
 # ── Bucket commands ───────────────────────────────────────────────────────────
@@ -163,60 +163,6 @@ def organize_command(bucket_name: str, confirm: bool):
     counts = organize_by_extension(client, bucket_name)
     for ext, count in sorted(counts.items()):
         logger.info("%s - %s", ext, count)
-
-
-# ── Versioning commands ───────────────────────────────────────────────────────
-
-@cli.command(name="versioning_status")
-@click.option("--bucket-name", required=True, help="Bucket to check.")
-@click.option("--versioning", "check", is_flag=True, default=False, help="Show versioning status.")
-def versioning_status_command(bucket_name: str, check: bool):
-    """Check whether versioning is enabled on a bucket."""
-    if not check:
-        logger.info("Pass --versioning to check versioning status")
-        return
-    client = init_client()
-    status = get_versioning_status(client, bucket_name)
-    logger.info("versioning_status result: %s", status)
-
-
-@cli.command(name="object_versions")
-@click.option("--bucket-name", required=True, help="Bucket that contains the object.")
-@click.option("--key", required=True, help="S3 object key (file name).")
-@click.option("--versions", "show", is_flag=True, default=False, help="List all versions of the object.")
-def object_versions_command(bucket_name: str, key: str, show: bool):
-    """Show version count and creation dates for a specific object."""
-    if not show:
-        logger.info("Pass --versions to list versions of '%s'", key)
-        return
-    client = init_client()
-    versions = list_object_versions(client, bucket_name, key)
-    logger.info("Total versions for '%s': %s", key, len(versions))
-
-
-@cli.command(name="restore_version")
-@click.option("--bucket-name", required=True, help="Bucket that contains the object.")
-@click.option("--key", required=True, help="S3 object key (file name).")
-@click.option("--restore", "confirm", is_flag=True, default=False, help="Restore the previous version as the new latest.")
-def restore_version_command(bucket_name: str, key: str, confirm: bool):
-    """Upload the previous version of an object as the new latest version."""
-    if not confirm:
-        logger.info("Pass --restore to restore previous version of '%s'", key)
-        return
-    client = init_client()
-    status = restore_previous_version(client, bucket_name, key)
-    logger.info("restore_version result: %s", status)
-
-
-@cli.command(name="delete_old_versions")
-@click.option("--bucket-name", required=True, help="Bucket that contains the objects.")
-@click.option("--key", required=True, multiple=True, help="S3 object key to check. Can be passed multiple times.")
-def delete_old_versions_command(bucket_name: str, key: tuple[str, ...]):
-    """Delete versions older than six months for the given object keys."""
-    client = init_client()
-    counts = delete_versions_older_than_six_months(client, bucket_name, key)
-    for object_key, count in counts.items():
-        logger.info("%s - deleted %s old version(s)", object_key, count)
 
 
 # ── Upload commands ───────────────────────────────────────────────────────────
